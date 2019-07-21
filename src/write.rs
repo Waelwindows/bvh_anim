@@ -3,13 +3,14 @@
 //! Contains options for `bvh` file formatting.
 
 use bstr::{BStr, BString, B};
-use crate::{duation_to_fractional_seconds, Bvh, Frame, Frames, Joint, Joints};
+use crate::{duation_to_fractional_seconds, Bvh, Frame, Frames, Joint};
 use mint::Vector3;
 use smallvec::SmallVec;
 use std::{
     fmt,
     io::{self, Write},
     iter, mem,
+    slice::Iter,
     num::NonZeroUsize,
 };
 
@@ -184,8 +185,7 @@ impl WriteOptions {
                 ref mut wrote_channels,
             } => {
                 if let Some(ref joint) = current_joint {
-                    let joint_data = joint.data();
-                    let mut depth = joint_data.depth();
+                    let mut depth = joint.depth;
                     if *wrote_name {
                         depth += 1
                     }
@@ -195,12 +195,12 @@ impl WriteOptions {
                             // @TODO: Contribute `Extend` impl for `BString` to avoid the `Vec`
                             // allocation
                             chunk.extend(self.indent.prefix_chars(depth));
-                            if joint_data.is_root() {
+                            if joint.is_root() {
                                 chunk.extend_from_slice(b"ROOT ");
                             } else {
                                 chunk.extend_from_slice(b"JOINT ");
                             }
-                            chunk.extend_from_slice(joint_data.name().as_ref());
+                            chunk.extend_from_slice(joint.name.as_ref());
                             chunk.extend_from_slice(terminator);
                             chunk.extend(self.indent.prefix_chars(depth));
                             chunk.push(b'{');
@@ -213,7 +213,7 @@ impl WriteOptions {
                             // allocation
                             chunk.extend(self.indent.prefix_chars(depth));
 
-                            let Vector3 { x, y, z } = joint_data.offset();
+                            let Vector3 { x, y, z } = joint.offset;
                             let offset_str = format!(
                                 "OFFSET {:.*} {:.*} {:.*}",
                                 self.offset_significant_figures,
@@ -232,7 +232,7 @@ impl WriteOptions {
                             // allocation
                             chunk.extend(self.indent.prefix_chars(depth));
 
-                            let channels = joint_data.channels();
+                            let channels = &joint.channels[..];
                             let channels_str = channels
                                 .iter()
                                 .map(|ch| ch.channel_type().as_str())
@@ -246,7 +246,7 @@ impl WriteOptions {
                             *wrote_channels = true;
                         }
                         (&mut true, &mut true, &mut true) => {
-                            if let Some(end_site) = joint_data.end_site() {
+                            if let Some(end_site) = joint.end_site {
                                 let Vector3 { x, y, z } = end_site;
                                 chunk.extend(self.indent.prefix_chars(depth));
                                 chunk.extend_from_slice(b"End Site");
@@ -278,10 +278,10 @@ impl WriteOptions {
 
                                 let (curr_depth, mut depth_difference) =
                                     if let Some(ref curr_j) = *current_joint {
-                                        let curr_depth = curr_j.data().depth();
-                                        (curr_depth, Some(prev_joint.data().depth() - curr_depth))
+                                        let curr_depth = curr_j.depth;
+                                        (curr_depth, Some(prev_joint.depth - curr_depth))
                                     } else {
-                                        (0, Some(prev_joint.data().depth()))
+                                        (0, Some(prev_joint.depth))
                                     };
 
                                 while let Some(d) = depth_difference {
@@ -368,8 +368,8 @@ enum WriteOptionsIterState<'a> {
         written: bool,
     },
     WriteJoints {
-        joints: Joints<'a>,
-        current_joint: Option<Joint<'a>>,
+        joints: Iter<'a, Joint>,
+        current_joint: Option<&'a Joint>,
         wrote_name: bool,
         wrote_offset: bool,
         wrote_channels: bool,

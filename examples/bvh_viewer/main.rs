@@ -3,7 +3,7 @@
 mod arcball_camera;
 
 use arcball_camera::ArcBall;
-use bvh_anim::{Bvh, JointData};
+use bvh_anim::{Bvh, Joint};
 use gl::{self, types::*};
 use glutin::{
     dpi::LogicalSize, ContextBuilder, DeviceEvent, ElementState, Event, EventsLoop, KeyboardInput,

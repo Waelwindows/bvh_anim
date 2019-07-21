@@ -3,7 +3,7 @@
 use bstr::ByteSlice;
 use crate::{
     errors::{LoadJointsError, LoadMotionError},
-    fraction_seconds_to_duration, Axis, Bvh, Channel, ChannelType, EnumeratedLines, JointData,
+    fraction_seconds_to_duration, Axis, Bvh, Channel, ChannelType, EnumeratedLines, Joint,
     JointName,
 };
 use lexical::{parse, try_parse};
@@ -265,18 +265,18 @@ impl Bvh {
         let (mut curr_index, mut curr_depth) = (0usize, 0usize);
         let mut next_expected_line = NextExpectedLine::Hierarchy;
 
-        let mut curr_joint = JointData::empty_root();
+        let mut curr_joint = Joint::default();
         let mut in_end_site = false;
         let mut pushed_end_site_joint = false;
 
         #[inline]
-        fn get_parent_index(joints: &[JointData], for_depth: usize) -> usize {
+        fn get_parent_index(joints: &[Joint], for_depth: usize) -> Option<usize> {
             joints
                 .iter()
+                .enumerate()
                 .rev()
-                .find(|jd| jd.depth() == for_depth.saturating_sub(2))
-                .and_then(|jd| jd.private_data().map(|p| p.self_index))
-                .unwrap_or(0)
+                .find(|(_, jd)| jd.depth == for_depth.saturating_sub(2))
+                .map(|(i, _)| i)
         }
 
         for (line_num, line) in lines {
@@ -306,7 +306,7 @@ impl Bvh {
                     }
 
                     if let Some(name) = tokens.next() {
-                        curr_joint.set_name(name);
+                        curr_joint.name = From::from(name);
                     } else {
                         panic!("Missing root name!");
                     }
@@ -322,16 +322,11 @@ impl Bvh {
                     }
 
                     if in_end_site {
-                        if let JointData::Child {
-                            ref mut private, ..
-                        } = curr_joint
-                        {
-                            private.self_index = curr_index;
-                            private.parent_index = get_parent_index(&joints, curr_depth);
-                            private.depth = curr_depth - 1;
-                        }
+                        let mut new_joint = mem::replace(&mut curr_joint, Joint::default());
 
-                        let new_joint = mem::replace(&mut curr_joint, JointData::empty_child());
+                        new_joint.parent_index = get_parent_index(&joints, curr_depth);
+                        new_joint.depth = curr_depth.saturating_sub(1);
+
                         joints.push(new_joint);
                         curr_index += 1;
                         in_end_site = false;
@@ -351,16 +346,10 @@ impl Bvh {
                     }
 
                     if !pushed_end_site_joint {
-                        if let JointData::Child {
-                            ref mut private, ..
-                        } = curr_joint
-                        {
-                            private.self_index = curr_index;
-                            private.parent_index = get_parent_index(&joints, curr_depth);
-                            private.depth = curr_depth - 1;
-                        }
+                        curr_joint.parent_index = get_parent_index(&joints, curr_depth);
+                        curr_joint.depth = curr_depth - 1;
 
-                        let new_joint = mem::replace(&mut curr_joint, JointData::empty_child());
+                        let new_joint = mem::replace(&mut curr_joint, Joint::default());
                         joints.push(new_joint);
 
                         curr_index += 1;
@@ -369,7 +358,7 @@ impl Bvh {
                     }
 
                     if let Some(name) = tokens.next() {
-                        curr_joint.set_name(name);
+                        curr_joint.name = From::from(name);
                     } else {
                         panic!("Missing joint name!");
                     }
@@ -404,7 +393,11 @@ impl Bvh {
                     parse_axis!(y, Y);
                     parse_axis!(z, Z);
 
-                    curr_joint.set_offset(offset, in_end_site);
+                    if in_end_site {
+                        curr_joint.end_site = Some(offset);
+                    } else {
+                        curr_joint.offset = offset;
+                    }
                 }
                 CHANNELS_KEYWORD => {
                     if curr_mode != ParseMode::InHeirarchy {
@@ -440,7 +433,7 @@ impl Bvh {
                         channels.push(channel);
                     }
 
-                    curr_joint.set_channels(channels);
+                    curr_joint.channels = channels;
                 }
                 _ => {}
             }

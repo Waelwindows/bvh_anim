@@ -2,8 +2,8 @@
 
 //! Defines a `Builder` struct used to build a `Bvh` dynamically.
 
-use bstr::BStr;
-use crate::{Bvh, Channel, ChannelType, JointName};
+use bstr::{BStr, ByteSlice};
+use crate::{Bvh, Channel, ChannelType, joint::JointName};
 use mint::Vector3;
 use smallvec::SmallVec;
 use std::{fmt, time::Duration};
@@ -84,7 +84,7 @@ impl BuilderJoint {
     ) -> Self {
         BuilderJoint {
             is_root,
-            name: JointName::from(name),
+            name: JointName::from(name.as_bytes()),
             offset,
             channels,
             end_site_offset: None,

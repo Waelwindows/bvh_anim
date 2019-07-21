@@ -221,11 +221,12 @@ use std::{
     iter::Enumerate,
     mem,
     ops::{Index, IndexMut, Range},
+    slice::{Iter, IterMut},
     str::{self, FromStr},
     time::Duration,
 };
 
-pub use joint::{Joint, JointData, JointMut, JointName, Joints, JointsMut};
+pub use joint::{Joint, JointName};
 #[doc(hidden)]
 pub use macros::BvhLiteralBuilder;
 
@@ -368,7 +369,7 @@ pub fn from_str(string: &str) -> Result<Bvh, LoadError> {
 pub struct Bvh {
     /// The list of joints. If the root joint exists, it is always at
     /// index `0`.
-    joints: Vec<JointData>,
+    joints: Vec<Joint>,
     /// The motion values of the `Frame`.
     motion_values: Vec<f32>,
     /// The number of frames in the bvh.
@@ -505,26 +506,19 @@ impl Bvh {
     /// assert!(bvh.root_joint().is_some());
     /// ```
     #[inline]
-    pub fn root_joint(&self) -> Option<Joint<'_>> {
-        if self.joints.is_empty() {
-            None
-        } else {
-            Some(Joint {
-                index: 0,
-                joints: &self.joints[..],
-            })
-        }
+    pub fn root_joint(&self) -> Option<&Joint> {
+        self.joints.get(0)
     }
 
     /// Returns an iterator over all the `Joint`s in the `Bvh`.
     #[inline]
-    pub fn joints(&self) -> Joints<'_> {
-        Joints::iter_root(&self.joints[..])
+    pub fn joints(&self) -> Iter<'_, Joint> {
+        self.joints.iter()
     }
 
     /// Returns a mutable iterator over all the joints in the `Bvh`.
-    pub fn joints_mut(&mut self) -> JointsMut<'_> {
-        JointsMut::iter_root(&mut self.joints[..])
+    pub fn joints_mut(&mut self) -> IterMut<'_, Joint> {
+        self.joints.iter_mut()
     }
 
     /// Returns a `Frames` iterator over the frames of the bvh.

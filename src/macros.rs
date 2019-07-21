@@ -1,4 +1,4 @@
-use crate::{fraction_seconds_to_duration, joint::JointData, Bvh, Channel, ChannelType};
+use crate::{fraction_seconds_to_duration, joint::Joint, Bvh, Channel, ChannelType};
 
 #[doc(hidden)]
 #[macro_export]
@@ -420,8 +420,8 @@ pub struct BvhLiteralBuilder {
 #[doc(hidden)]
 impl BvhLiteralBuilder {
     pub fn push_root(&mut self, name: &str) {
-        let mut root = JointData::empty_root();
-        root.set_name(name);
+        let mut root = Joint::default();
+        root.name = From::from(name.as_bytes());
         self.bvh.joints.push(root);
         self.current_index += 1;
     }
@@ -429,26 +429,23 @@ impl BvhLiteralBuilder {
     pub fn push_joint(&mut self, name: &str) {
         // @TODO: make this shared
         #[inline]
-        fn get_parent_index(joints: &[JointData], for_depth: usize) -> usize {
+        fn get_parent_index(joints: &[Joint], for_depth: usize) -> usize {
             joints
                 .iter()
+                .enumerate()
                 .rev()
-                .find(|jd| jd.depth() == for_depth.saturating_sub(1))
-                .and_then(|jd| jd.private_data().map(|p| p.self_index))
+                .find(|(_, jd)| jd.depth == for_depth.saturating_sub(1))
+                .map(|(i, _)| i)
                 .unwrap_or(0)
         }
 
-        let idx = self.current_index;
         let dpth = self.current_depth;
         let parent = get_parent_index(&self.bvh.joints[..], dpth);
 
-        let mut joint = JointData::empty_child();
-        joint.set_name(name);
-        if let Some(ref mut private) = joint.private_data_mut() {
-            private.self_index = idx;
-            private.depth = dpth;
-            private.parent_index = parent;
-        };
+        let mut joint = Joint::default();
+        joint.name = From::from(name.as_bytes());
+        joint.parent_index = Some(parent);
+        joint.depth = dpth;
 
         self.bvh.joints.push(joint);
 
@@ -457,24 +454,17 @@ impl BvhLiteralBuilder {
 
     pub fn push_channel(&mut self, channel: ChannelType) {
         let channel = Channel::new(channel, self.current_channel_index);
-        self.last_joint().map(|joint| match *joint {
-            JointData::Root {
-                ref mut channels, ..
-            } => {
-                channels.push(channel);
-            }
-            JointData::Child {
-                ref mut channels, ..
-            } => {
-                channels.push(channel);
-            }
-        });
+        self.last_joint().map(|joint| joint.channels.push(channel));
         self.current_channel_index += 1;
     }
 
     pub fn push_joint_offset(&mut self, offset: mint::Vector3<f32>, is_end_site: bool) {
         self.last_joint().map(|joint| {
-            joint.set_offset(offset, is_end_site);
+            if is_end_site {
+                joint.end_site = Some(offset);
+            } else {
+                joint.offset = offset;
+            }
         });
     }
 
@@ -505,7 +495,7 @@ impl BvhLiteralBuilder {
     }
 
     #[inline]
-    fn last_joint(&mut self) -> Option<&mut JointData> {
+    fn last_joint(&mut self) -> Option<&mut Joint> {
         self.bvh.joints.last_mut()
     }
 }
@@ -541,20 +531,20 @@ mod tests {
         };
 
         {
-            use super::{ChannelType, JointData};
+            use super::{ChannelType, Joint};
             use mint::Vector3;
 
             fn check_joint<V0: Into<Vector3<f32>>, V1: Into<Vector3<f32>>, O: Into<Option<V1>>>(
-                joint: &JointData,
-                expected_name: &str,
+                joint: &Joint,
+                expected_name: &[u8],
                 expected_offset: V0,
                 channels: &[ChannelType],
                 end_site: O,
             ) {
-                assert_eq!(joint.name(), expected_name);
-                assert_eq!(*joint.offset(), expected_offset.into());
+                assert_eq!(&joint.name[..], expected_name);
+                assert_eq!(joint.offset, expected_offset.into());
                 for (chan, expected_chan) in joint
-                    .channels()
+                    .channels
                     .iter()
                     .map(|c| c.channel_type())
                     .zip(channels.iter())
@@ -562,14 +552,14 @@ mod tests {
                     assert_eq!(chan, *expected_chan);
                 }
                 let end_site = end_site.into().map(Into::into);
-                assert_eq!(joint.end_site(), end_site.as_ref());
+                assert_eq!(joint.end_site(), end_site);
             }
 
             let mut joints = bvh.joints();
 
             check_joint::<[_; 3], [f32; 3], _>(
-                joints.next().unwrap().data(),
-                "Base",
+                joints.next().unwrap(),
+                b"Base",
                 [0.0, 0.0, 0.0],
                 &[
                     ChannelType::PositionX,
@@ -583,8 +573,8 @@ mod tests {
             );
 
             check_joint(
-                joints.next().unwrap().data(),
-                "End",
+                joints.next().unwrap(),
+                b"End",
                 [0.0, 0.0, 15.0],
                 &[
                     ChannelType::RotationZ,
