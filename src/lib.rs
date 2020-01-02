@@ -383,8 +383,14 @@ pub struct Bvh {
 impl Bvh {
     /// Create an empty `Bvh`.
     #[inline]
-    pub fn new() -> Self {
-        Default::default()
+    pub const fn new() -> Self {
+        Self {
+            joints: Vec::new(),
+            motion_values: Vec::new(),
+            num_frames: 0,
+            num_channels: 0,
+            frame_time: Duration::from_secs(0),
+        }
     }
 
     /// Parse a sequence of bytes as if it were an in-memory `Bvh` file.
