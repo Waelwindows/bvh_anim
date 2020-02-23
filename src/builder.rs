@@ -2,11 +2,13 @@
 
 //! Defines a `Builder` struct used to build a `Bvh` dynamically.
 
+use crate::{joint::JointName, Bvh, Channel, ChannelType};
 use bstr::{BStr, ByteSlice};
-use crate::{Bvh, Channel, ChannelType, joint::JointName};
 use mint::Vector3;
 use smallvec::SmallVec;
 use std::{fmt, time::Duration};
+
+use crate::joint::Joint;
 
 /// The `Builder`.
 #[derive(Default)]
@@ -43,7 +45,7 @@ impl Builder {
     ) -> JointsBuilder {
         let mut num_channels = 0;
         let channels = collect_channels(channels, &mut num_channels);
-        let root_joint = BuilderJoint::new(true, name, offset, channels, 0);
+        let root_joint = new_joint(None, name, offset, channels, 0);
 
         JointsBuilder {
             joints: vec![root_joint],
@@ -54,7 +56,7 @@ impl Builder {
 
 /// The `JointsBuilder`.
 pub struct JointsBuilder {
-    joints: Vec<BuilderJoint>,
+    joints: Vec<Joint>,
     num_channels: usize,
 }
 
@@ -64,38 +66,25 @@ impl fmt::Debug for JointsBuilder {
     }
 }
 
-struct BuilderJoint {
-    is_root: bool,
-    name: JointName,
+fn new_joint(
+    parent_index: Option<usize>,
+    name: &BStr,
     offset: Vector3<f32>,
     channels: SmallVec<[Channel; 6]>,
-    end_site_offset: Option<Vector3<f32>>,
     depth: usize,
-    parent_index: Option<usize>,
-}
-
-impl BuilderJoint {
-    fn new(
-        is_root: bool,
-        name: &BStr,
-        offset: Vector3<f32>,
-        channels: SmallVec<[Channel; 6]>,
-        depth: usize,
-    ) -> Self {
-        BuilderJoint {
-            is_root,
-            name: JointName::from(name.as_bytes()),
-            offset,
-            channels,
-            end_site_offset: None,
-            depth,
-            parent_index: if is_root { None } else { Some(0) },
-        }
+) -> Joint {
+    Joint {
+        name: JointName::from(name.as_bytes()),
+        offset,
+        channels,
+        depth,
+        parent_index,
+        ..Default::default()
     }
 }
 
 impl JointsBuilder {
-    /// Push a `Joint`.
+    /// Push a `Joint`, setting the parent to be the previous joint.
     pub fn push_child(
         mut self,
         depth: usize,
@@ -103,15 +92,33 @@ impl JointsBuilder {
         offset: Vector3<f32>,
         channels: &[ChannelType],
     ) -> Self {
+        let parent = self.joints.len() - 1;
+        self.push_child_with_parent(depth, name, offset, channels, parent)
+    }
+
+    /// Push a `Joint` with `parent_idx` being the index of the parent,
+    /// # Panics
+    ///
+    /// Panics if `parent_idx` is out of bounds.
+
+    pub fn push_child_with_parent(
+        mut self,
+        depth: usize,
+        name: &BStr,
+        offset: Vector3<f32>,
+        channels: &[ChannelType],
+        parent_idx: usize,
+    ) -> Self {
         let channels = collect_channels(channels, &mut self.num_channels);
+        assert!(parent_idx < self.joints.len());
         self.joints
-            .push(BuilderJoint::new(false, name, offset, channels, depth));
+            .push(new_joint(Some(parent_idx), name, offset, channels, depth));
         self
     }
 
     /// Cap the last pushed `Joint` with an `End Site`.
     pub fn push_end(mut self, offset: Vector3<f32>) -> Self {
-        self.joints.last_mut().unwrap().end_site_offset = Some(offset);
+        self.joints.last_mut().unwrap().end_site = Some(offset);
         self
     }
 
@@ -154,10 +161,7 @@ impl MotionBuilder {
     pub fn build(self) -> Result<Bvh, ()> {
         let mut bvh = Bvh::default();
 
-        for joint in &self.joints_builder.joints {
-            // @TODO: convert `BuilderJoint`s to `JointData` structs.
-        }
-
+        bvh.joints = self.joints_builder.joints;
         bvh.set_frame_time(self.frame_time);
         bvh.num_frames = self.num_frames;
         bvh.num_channels = self.joints_builder.num_channels;
